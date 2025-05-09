@@ -7,9 +7,6 @@ using namespace oska;
 
 OSKA_DEFINE_EVENT(EvPrint, int, std::string)
 
-void printHandler(int code, std::string msg) {
-    std::cout << "[" << code << "] " << msg << "\n";
-}
 
 OSKA_DEFINE_EVENT(evNoArgs)
 OSKA_DEFINE_EVENT(evOneArg, int)
@@ -34,11 +31,14 @@ void handleTwoArgs(int a, const char* b) {
 
 int main() {
     // Register handlers
+    //Corman.connect<evNoArgs>(&coreA, handleOneArg); //should fail in compile time
     Corman.connect<evNoArgs>(&coreA, handleNoArgs);
     Corman.connect<evOneArg>(&coreB, handleOneArg);
     Corman.connect<evTwoArgs>(&coreB, handleTwoArgs);
 
-    oska::Corman.connect<EvPrint>(&coreA, printHandler);
+    oska::Corman.connect<EvPrint>(&coreA, [](int x, std::string str) {
+        std::cout << "[coreA] EvPrint handler: x = " << x << ", str = " << str << "\n";
+    });
     
 
     // Start loops on threads

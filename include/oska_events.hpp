@@ -81,12 +81,26 @@ private:
     std::unordered_map<std::type_index, Callback> callbacks;
 };
 
+// ---- Type Traits for Event Arguments ---- //
+template<typename Tuple, typename F>
+struct is_invocable_from_tuple;
+
+template<typename... Args, typename F>
+struct is_invocable_from_tuple<std::tuple<Args...>, F> {
+    static constexpr bool value = std::is_invocable_v<F, Args...>;
+};
+
+
 // ---- CormanManager ---- //
 class CormanManager {
 public:
     template<typename EventTag, typename Func>
     void connect(EventLoop* loop, Func handler) {
         using ExpectedArgs = typename EventTraits<EventTag>::Args;
+
+        static_assert(is_invocable_from_tuple<ExpectedArgs, Func>::value,
+                    "Handler is not callable with arguments from EventTraits");
+
         Callback cb = [handler](void* data) {
             auto tuple = static_cast<ExpectedArgs*>(data);
             std::apply(handler, *tuple);
