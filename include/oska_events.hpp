@@ -1,41 +1,41 @@
 #ifndef OSKA_EVENTS_HPP
 #define OSKA_EVENTS_HPP
 
-#include <cstdint>
-#include <unordered_map>
-#include <queue>
-#include <functional>
 #include <tuple>
+#include <queue>
+#include <unordered_map>
+#include <functional>
 #include <memory>
+#include <typeindex>
+#include <type_traits>
 
 namespace oska {
 
-class EventID {
-public:
-    using IdType = uint32_t;
+// ---- EventTraits (Must be specialized for each event) ---- //
+template<typename EventTag>
+struct EventTraits;
 
-    static EventID make() {
-        return EventID{nextID++};
-    }
+// ---- Macros to declare and define events ---- //
+#define OSKA_DECLARE_EVENT(name) struct name;
 
-    IdType value() const { return id; }
-    operator IdType() const { return id; }
-    bool operator==(const EventID& other) const { return id == other.id; }
+#define OSKA_DEFINE_EVENT(name, ...)                       \
+    struct name {};                                        \
+    template<> struct oska::EventTraits<name> {            \
+        using Args = std::tuple<__VA_ARGS__>;              \
+    };
 
-    
-private:
-    explicit EventID(IdType i) : id(i) {}
-    IdType id;
-    static inline IdType nextID = 0;
-};
-
+// ---- Callback and Event Wrapper ---- //
 using Callback = std::function<void(void*)>;
 
 struct EventWrapper {
-    EventID::IdType id;
+    std::type_index tag;
     void* data;
+
+    EventWrapper() : tag(typeid(void)), data(nullptr) {}
+    EventWrapper(std::type_index t, void* d) : tag(t), data(d) {}
 };
 
+// ---- Event Queue ---- //
 class EventQueue {
 public:
     void push(const EventWrapper& ev) {
@@ -49,29 +49,26 @@ public:
         return true;
     }
 
-    bool empty() const {
-        return queue.empty();
-    }
-
 private:
     std::queue<EventWrapper> queue;
 };
 
+// ---- Event Loop ---- //
 class EventLoop {
 public:
-    void post(EventID::IdType id, void* data) {
-        queue.push({id, data});
+    void post(std::type_index tag, void* data) {
+        queue.push({tag, data});
     }
 
-    void connect(EventID::IdType id, Callback cb) {
-        callbacks[id] = cb;
+    void connect(std::type_index tag, Callback cb) {
+        callbacks[tag] = cb;
     }
 
     void run() {
         while (true) {
             EventWrapper ev;
             if (queue.pop(ev)) {
-                auto it = callbacks.find(ev.id);
+                auto it = callbacks.find(ev.tag);
                 if (it != callbacks.end()) {
                     it->second(ev.data);
                 }
@@ -81,40 +78,43 @@ public:
 
 private:
     EventQueue queue;
-    std::unordered_map<EventID::IdType, Callback> callbacks;
+    std::unordered_map<std::type_index, Callback> callbacks;
 };
 
+// ---- CormanManager ---- //
 class CormanManager {
 public:
-    template<typename... Args>
-    void connect(EventID::IdType id, EventLoop* loop, std::function<void(Args...)> handler) {
+    template<typename EventTag, typename Func>
+    void connect(EventLoop* loop, Func handler) {
+        using ExpectedArgs = typename EventTraits<EventTag>::Args;
         Callback cb = [handler](void* data) {
-            auto tuple = static_cast<std::tuple<Args...>*>(data);
+            auto tuple = static_cast<ExpectedArgs*>(data);
             std::apply(handler, *tuple);
             delete tuple;
         };
-        bindings[id] = {loop, cb};
-        if (loop) loop->connect(id, cb);
+
+        auto tag = std::type_index(typeid(EventTag));
+        bindings[tag] = {loop, cb};
+        if (loop) loop->connect(tag, cb);
     }
 
-    template<typename... Args>
-    void connect(EventID::IdType id, EventLoop* loop, void (*handler)(Args...)) {
-        connect(id, loop, std::function<void(Args...)>(handler));
-    }
+    template<typename EventTag, typename... PassedArgs>
+    void gen(PassedArgs&&... args) {
+        using ExpectedArgs = typename EventTraits<EventTag>::Args;
+        using ProvidedArgs = std::tuple<std::decay_t<PassedArgs>...>;
 
-    template<typename... Args>
-    void gen(EventID::IdType id, Args... args) {
-        auto tuple = new std::tuple<Args...>(args...);
-        dispatch(id, static_cast<void*>(tuple));
+        static_assert(std::is_same<ProvidedArgs, ExpectedArgs>::value,
+                      "Argument types do not match EventTraits");
+
+        auto* tuple = new ExpectedArgs{std::forward<PassedArgs>(args)...};
+        dispatch(std::type_index(typeid(EventTag)), static_cast<void*>(tuple));
     }
 
 private:
-    void dispatch(EventID::IdType id, void* data) {
-        auto it = bindings.find(id);
-        if (it != bindings.end()) {
-            if (it->second.target) {
-                it->second.target->post(id, data);
-            }
+    void dispatch(std::type_index tag, void* data) {
+        auto it = bindings.find(tag);
+        if (it != bindings.end() && it->second.target) {
+            it->second.target->post(tag, data);
         }
     }
 
@@ -123,12 +123,11 @@ private:
         Callback callback;
     };
 
-    std::unordered_map<EventID::IdType, Binding> bindings;
+    std::unordered_map<std::type_index, Binding> bindings;
 };
 
+// ---- Global Manager Instance ---- //
 inline CormanManager Corman;
-
-#define OSKA_EVENT(name) inline const oska::EventID name = oska::EventID::make();
 
 } // namespace oska
 
