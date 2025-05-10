@@ -11,6 +11,14 @@
 
 namespace oska {
 
+template <typename T>
+struct TypeId {
+    static size_t value() {
+        static const char unique = 0;
+        return reinterpret_cast<size_t>(&unique);
+    }
+};
+
 // ---- EventTraits (Must be specialized for each event) ---- //
 template<typename EventTag>
 struct EventTraits;
@@ -28,11 +36,11 @@ struct EventTraits;
 using Callback = std::function<void(void*)>;
 
 struct EventWrapper {
-    std::type_index tag;
+    size_t tag;
     void* data;
 
-    EventWrapper() : tag(typeid(void)), data(nullptr) {}
-    EventWrapper(std::type_index t, void* d) : tag(t), data(d) {}
+    EventWrapper() : tag(oska::TypeId<void>::value()), data(nullptr) {}
+    EventWrapper(std::size_t t, void* d) : tag(t), data(d) {}
 };
 
 // ---- Event Queue ---- //
@@ -56,11 +64,11 @@ private:
 // ---- Event Loop ---- //
 class EventLoop {
 public:
-    void post(std::type_index tag, void* data) {
+    void post(size_t tag, void* data) {
         queue.push({tag, data});
     }
 
-    void connect(std::type_index tag, Callback cb) {
+    void connect(size_t tag, Callback cb) {
         callbacks[tag] = cb;
     }
 
@@ -78,7 +86,7 @@ public:
 
 private:
     EventQueue queue;
-    std::unordered_map<std::type_index, Callback> callbacks;
+    std::unordered_map<size_t, Callback> callbacks;
 };
 
 // ---- Type Traits for Event Arguments ---- //
@@ -107,7 +115,8 @@ public:
             delete tuple;
         };
 
-        auto tag = std::type_index(typeid(EventTag));
+        auto tag = oska::TypeId<EventTag>::value();
+
         bindings[tag] = {loop, cb};
         if (loop) loop->connect(tag, cb);
     }
@@ -121,11 +130,11 @@ public:
                       "Argument types do not match EventTraits");
 
         auto* tuple = new ExpectedArgs{std::forward<PassedArgs>(args)...};
-        dispatch(std::type_index(typeid(EventTag)), static_cast<void*>(tuple));
+        dispatch(oska::TypeId<EventTag>::value(), static_cast<void*>(tuple));
     }
 
 private:
-    void dispatch(std::type_index tag, void* data) {
+    void dispatch(size_t tag, void* data) {
         auto it = bindings.find(tag);
         if (it != bindings.end() && it->second.target) {
             it->second.target->post(tag, data);
@@ -137,7 +146,7 @@ private:
         Callback callback;
     };
 
-    std::unordered_map<std::type_index, Binding> bindings;
+    std::unordered_map<size_t, Binding> bindings;
 };
 
 // ---- Global Manager Instance ---- //
