@@ -15,6 +15,6 @@ elseif(MSVC)
 endif()
 
 # === Test Executable ===
-add_executable(testEvents test/testEvents.cpp)
+add_executable(testEvents tests/testEvents.cpp)
 target_include_directories(testEvents PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(testEvents pthread)
