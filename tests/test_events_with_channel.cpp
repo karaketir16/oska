@@ -2,8 +2,59 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <channel.hpp>
 
 using namespace oska;
+
+
+// ---- Event Queue ---- //
+class EventQueue : public EventQueueInterface {
+public:
+    void push(const EventWrapper& ev) override {
+        queue.add(ev);
+    }
+
+    bool pop(EventWrapper& out) override {
+        auto result = queue.try_get();
+        if (result) {
+            out = *result;
+            return true;
+        }
+        return false;
+    }
+private:
+    Channel<EventWrapper, 50> queue;
+};
+
+// ---- Event Loop ---- //
+class EventLoop : public EventLoopInterface {
+public:
+    EventLoop() : queue(new EventQueue()) {}
+
+    void post(size_t tag, void* data) override {
+        queue->push({tag, data});
+    }
+
+    void connect(size_t tag, Callback cb) override {
+        callbacks[tag] = cb;
+    }
+
+    void run() override {
+        while (true) {
+            EventWrapper ev;
+            if (queue->pop(ev)) {
+                auto it = callbacks.find(ev.tag);
+                if (it != callbacks.end()) {
+                    it->second(ev.data);
+                }
+            }
+        }
+    }
+
+private:
+    EventQueueInterface* queue;
+    std::unordered_map<size_t, Callback> callbacks;
+};
 
 OSKA_DEFINE_EVENT(EvPrint, int, std::string)
 

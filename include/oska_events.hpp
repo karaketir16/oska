@@ -8,6 +8,7 @@
 #include <memory>
 #include <typeindex>
 #include <type_traits>
+#include <mutex>
 
 namespace oska {
 
@@ -43,50 +44,17 @@ struct EventWrapper {
     EventWrapper(std::size_t t, void* d) : tag(t), data(d) {}
 };
 
-// ---- Event Queue ---- //
-class EventQueue {
+class EventQueueInterface {
 public:
-    void push(const EventWrapper& ev) {
-        queue.push(ev);
-    }
-
-    bool pop(EventWrapper& out) {
-        if (queue.empty()) return false;
-        out = queue.front();
-        queue.pop();
-        return true;
-    }
-
-private:
-    std::queue<EventWrapper> queue;
+    virtual void push(const EventWrapper& ev) = 0;
+    virtual bool pop(EventWrapper& out) = 0;
 };
 
-// ---- Event Loop ---- //
-class EventLoop {
+class EventLoopInterface {
 public:
-    void post(size_t tag, void* data) {
-        queue.push({tag, data});
-    }
-
-    void connect(size_t tag, Callback cb) {
-        callbacks[tag] = cb;
-    }
-
-    void run() {
-        while (true) {
-            EventWrapper ev;
-            if (queue.pop(ev)) {
-                auto it = callbacks.find(ev.tag);
-                if (it != callbacks.end()) {
-                    it->second(ev.data);
-                }
-            }
-        }
-    }
-
-private:
-    EventQueue queue;
-    std::unordered_map<size_t, Callback> callbacks;
+    virtual void post(size_t tag, void* data) = 0;
+    virtual void connect(size_t tag, Callback cb) = 0;
+    virtual void run() = 0;
 };
 
 // ---- Type Traits for Event Arguments ---- //
@@ -103,7 +71,7 @@ struct is_invocable_from_tuple<std::tuple<Args...>, F> {
 class CormanManager {
 public:
     template<typename EventTag, typename Func>
-    void connect(EventLoop* loop, Func handler) {
+    void connect(EventLoopInterface* loop, Func handler) {
         using ExpectedArgs = typename EventTraits<EventTag>::Args;
 
         static_assert(is_invocable_from_tuple<ExpectedArgs, Func>::value,
@@ -117,12 +85,15 @@ public:
 
         auto tag = oska::TypeId<EventTag>::value();
 
+        std::unique_lock<std::mutex> lock(mtx);
         bindings[tag] = {loop, cb};
         if (loop) loop->connect(tag, cb);
     }
 
     template<typename EventTag, typename... PassedArgs>
     void gen(PassedArgs&&... args) {
+        
+
         using ExpectedArgs = typename EventTraits<EventTag>::Args;
         using ProvidedArgs = std::tuple<std::decay_t<PassedArgs>...>;
 
@@ -130,6 +101,8 @@ public:
                       "Argument types do not match EventTraits");
 
         auto* tuple = new ExpectedArgs{std::forward<PassedArgs>(args)...};
+
+        std::unique_lock<std::mutex> lock(mtx);
         dispatch(oska::TypeId<EventTag>::value(), static_cast<void*>(tuple));
     }
 
@@ -142,11 +115,12 @@ private:
     }
 
     struct Binding {
-        EventLoop* target;
+        EventLoopInterface* target;
         Callback callback;
     };
 
     std::unordered_map<size_t, Binding> bindings;
+    std::mutex mtx;
 };
 
 // ---- Global Manager Instance ---- //
