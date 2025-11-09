@@ -18,19 +18,25 @@ endif()
 find_package(GTest REQUIRED)
 include_directories(${GTEST_INCLUDE_DIRS})
 
+enable_testing()
+
 # === Test Executable ===
 add_executable(test_events tests/test_events.cpp)
 target_include_directories(test_events PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(test_events pthread ${GTEST_LIBRARIES})
+add_test(NAME test_events COMMAND test_events)
 
 add_executable(test_events_with_channel tests/test_events_with_channel.cpp)
 target_include_directories(test_events_with_channel PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(test_events_with_channel pthread ${GTEST_LIBRARIES})
+add_test(NAME test_events_with_channel COMMAND test_events_with_channel)
 
 add_executable(channel_test tests/channel_test.cpp)
 target_include_directories(channel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(channel_test ${GTEST_LIBRARIES})
+add_test(NAME channel_test COMMAND channel_test)
 
 add_executable(move_copy_test tests/move_copy_test.cpp)
 target_include_directories(move_copy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(move_copy_test ${GTEST_LIBRARIES})
+add_test(NAME move_copy_test COMMAND move_copy_test)

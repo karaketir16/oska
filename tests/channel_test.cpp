@@ -2,6 +2,7 @@
 #include <thread>
 #include <vector>
 #include <chrono>
+#include <future>
 #include "channel.hpp"
 
 using namespace oska;
@@ -19,10 +20,73 @@ class ChannelTest : public ::testing::Test {
 protected:
     using T = typename Params::Type;
     static const size_t N = Params::Size;
-    Channel<T, N> channel;
+Channel<T, N> channel;
 };
 
 TYPED_TEST_SUITE_P(ChannelTest);
+
+TEST(ChannelBehaviorTest, TryAddFailsWhenFull) {
+    Channel<int, 1> channel;
+
+    EXPECT_EQ(channel.add(1), ChannelBase::Result::OK);
+    EXPECT_EQ(channel.try_add(2), ChannelBase::Result::FULL);
+
+    auto value = channel.get();
+    ASSERT_TRUE(value);
+    EXPECT_EQ(*value, 1);
+}
+
+TEST(ChannelBehaviorTest, TryGetFailsWhenEmpty) {
+    Channel<int, 2> channel;
+    ChannelBase::Result result = ChannelBase::Result::OK;
+
+    auto value = channel.try_get(result);
+    EXPECT_FALSE(value);
+    EXPECT_EQ(result, ChannelBase::Result::EMPTY);
+}
+
+TEST(ChannelZeroCapacityTest, AddRequiresWaitingConsumer) {
+    Channel<int, 0> channel;
+    std::promise<int> received;
+    auto future_value = received.get_future();
+
+    std::thread consumer([&]() {
+        auto value = channel.get();
+        ASSERT_TRUE(value);
+        received.set_value(*value);
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+    EXPECT_EQ(channel.add(7), ChannelBase::Result::OK);
+    EXPECT_EQ(future_value.get(), 7);
+
+    consumer.join();
+}
+
+TEST(ChannelBehaviorTest, CloseUnblocksWaitingProducer) {
+    Channel<int, 1> channel;
+    EXPECT_EQ(channel.add(1), ChannelBase::Result::OK);
+
+    std::promise<ChannelBase::Result> producer_result_promise;
+    auto producer_result = producer_result_promise.get_future();
+
+    std::thread producer([&]() {
+        producer_result_promise.set_value(channel.add(2));
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+    channel.close();
+
+    EXPECT_EQ(producer_result.get(), ChannelBase::Result::CLOSED);
+
+    auto first = channel.get();
+    ASSERT_TRUE(first);
+    EXPECT_EQ(*first, 1);
+
+    producer.join();
+}
 
 TYPED_TEST_P(ChannelTest, AddAndGet) {
     using T = typename TypeParam::Type;
